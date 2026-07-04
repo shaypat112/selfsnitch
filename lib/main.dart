@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+import 'speed_violation.dart';
+import 'database_helper.dart';
 
 void main() {
   runApp(const SelfSnitchApp());
@@ -17,18 +20,6 @@ class SelfSnitchApp extends StatelessWidget {
   }
 }
 
-class SpeedViolation {
-  final DateTime timestamp;
-  final double speedMph;
-  final LatLng location;
-
-  SpeedViolation({
-    required this.timestamp,
-    required this.speedMph,
-    required this.location,
-  });
-}
-
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -38,11 +29,9 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   static final LatLng charlotte = LatLng(35.2271, -80.8431);
+  static const double maxSpeedMph = 80.0;
 
-  // TODO: eventually fetch the real speed limit for the current road from
-  // an API based on location, instead of one fixed value for the whole trip.
-  static const double maxSpeedMph = 90.0;
-
+  final DatabaseHelper _dbHelper = DatabaseHelper();
   final List<SpeedViolation> _violations = [];
 
   final MapController _mapController = MapController();
@@ -54,7 +43,15 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _loadSavedViolations();
     _startTrackingLocation();
+  }
+
+  Future<void> _loadSavedViolations() async {
+    final saved = await _dbHelper.getAllViolations();
+    setState(() {
+      _violations.addAll(saved);
+    });
   }
 
   Future<void> _startTrackingLocation() async {
@@ -78,7 +75,6 @@ class _MapScreenState extends State<MapScreen> {
           locationSettings: locationSettings,
         ).listen((Position position) {
           final newLocation = LatLng(position.latitude, position.longitude);
-
           final rawSpeedMps = position.speed < 0 ? 0.0 : position.speed;
           final speedMph = rawSpeedMps * 2.23694;
           final isSpeedingNow = speedMph > maxSpeedMph;
@@ -87,18 +83,21 @@ class _MapScreenState extends State<MapScreen> {
             _currentLocation = newLocation;
             _speedMph = speedMph;
 
-            // Edge detection: only log the moment a violation *begins* — the
-            // transition from not-speeding to speeding — not every single GPS
-            // update while still over the limit. Without this check, one hard
-            // press on the highway would log dozens of "violations" per second.
             if (isSpeedingNow && !_isSpeeding) {
-              _violations.add(
-                SpeedViolation(
-                  timestamp: DateTime.now(),
-                  speedMph: speedMph,
-                  location: newLocation,
-                ),
+              final violation = SpeedViolation(
+                timestamp: DateTime.now(),
+                speedMph: speedMph,
+                location: newLocation,
               );
+              // Update the on-screen list immediately, so the badge count and
+              // history screen feel instant...
+              _violations.add(violation);
+              // ...while the actual disk write happens in the background. We
+              // don't `await` this — we don't want a slow disk write to freeze
+              // the UI thread for even a moment. This is called an "optimistic
+              // update": trust that the save will succeed, update the UI now,
+              // and let the save happen quietly behind it.
+              _dbHelper.insertViolation(violation);
             }
 
             _isSpeeding = isSpeedingNow;
@@ -120,13 +119,24 @@ class _MapScreenState extends State<MapScreen> {
       appBar: AppBar(
         title: const Text('SelfSnitch'),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: Badge(
-                label: Text('${_violations.length}'),
-                isLabelVisible: _violations.isNotEmpty,
-                child: const Icon(Icons.warning_amber_rounded),
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      ViolationHistoryScreen(violations: _violations),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Badge(
+                  label: Text('${_violations.length}'),
+                  isLabelVisible: _violations.isNotEmpty,
+                  child: const Icon(Icons.warning_amber_rounded),
+                ),
               ),
             ),
           ),
@@ -197,6 +207,40 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class ViolationHistoryScreen extends StatelessWidget {
+  final List<SpeedViolation> violations;
+
+  const ViolationHistoryScreen({super.key, required this.violations});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Speed Violations')),
+      body: violations.isEmpty
+          ? const Center(child: Text('No violations yet — good driving!'))
+          : ListView.builder(
+              itemCount: violations.length,
+              itemBuilder: (context, index) {
+                final violation = violations[violations.length - 1 - index];
+                return ListTile(
+                  leading: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                  ),
+                  title: Text('${violation.speedMph.toStringAsFixed(0)} mph'),
+                  subtitle: Text(
+                    '${DateFormat.yMMMd().add_jm().format(violation.timestamp)}\n'
+                    '${violation.location.latitude.toStringAsFixed(4)}, '
+                    '${violation.location.longitude.toStringAsFixed(4)}',
+                  ),
+                  isThreeLine: true,
+                );
+              },
+            ),
     );
   }
 }
