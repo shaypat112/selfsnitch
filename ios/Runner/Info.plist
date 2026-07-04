@@ -66,5 +66,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SelfSnitch uses your location to track your driving and check for safety issues along your route and for tracking speed.</string>
 </dict>
 </plist>
