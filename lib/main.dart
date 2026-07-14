@@ -4,7 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
-import 'speed_violation.dart';
+import 'models/speed_violation.dart';
 import 'database_helper.dart';
 
 void main() {

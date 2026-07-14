@@ -1,6 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'speed_violation.dart';
+import 'models/speed_violation.dart';
 
 class DatabaseHelper {
   // Singleton pattern: no matter how many times DatabaseHelper() is called,
